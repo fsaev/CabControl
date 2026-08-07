@@ -1,0 +1,8 @@
+#ifndef PARAMS_H
+#define PARAMS_H
+
+#define PARAMS_VERSION_MAJOR 1
+#define PARAMS_VERSION_MINOR 2
+#define PARAMS_VERSION_PATCH 0
+
+#endif

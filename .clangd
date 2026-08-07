@@ -1,0 +1,10 @@
+CompileFlags:
+  CompilationDatabase: .
+  Add:
+    - -nostdinc++
+    - -isystem
+    - /Users/fredriksaevland/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/9.2.1
+    - -isystem
+    - /Users/fredriksaevland/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/9.2.1/arm-none-eabi
+    - -isystem
+    - /Users/fredriksaevland/.platformio/packages/toolchain-gccarmnoneeabi/arm-none-eabi/include/c++/9.2.1/backward

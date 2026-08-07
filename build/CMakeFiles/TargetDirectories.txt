@@ -1,0 +1,5 @@
+/Users/fredriksaevland/Documents/PlatformIO/Projects/CabControl/build/CMakeFiles/pio_compile.dir
+/Users/fredriksaevland/Documents/PlatformIO/Projects/CabControl/build/CMakeFiles/pio_clean.dir
+/Users/fredriksaevland/Documents/PlatformIO/Projects/CabControl/build/CMakeFiles/pio_flash.dir
+/Users/fredriksaevland/Documents/PlatformIO/Projects/CabControl/build/CMakeFiles/edit_cache.dir
+/Users/fredriksaevland/Documents/PlatformIO/Projects/CabControl/build/CMakeFiles/rebuild_cache.dir
