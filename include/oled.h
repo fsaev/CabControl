@@ -1,19 +1,26 @@
 #ifndef OLED_H
 #define OLED_H
 
+#include "bluetooth.h"
 #include "flap.h"
 #include "io.h"
+#include "power.h"
 #include <Adafruit_SSD1306.h>
 #include <stdint.h>
 
+class Control;
+
 class Oled {
 public:
-  Oled();
+  Oled(Power& power, Flap& flap, Bluetooth& bluetooth);
   void init();
   void iterate_sw();
-  float get_dc_in_voltage() const;
-  float get_dc_adj_voltage() const;
-  void iterate(const Flap &flap, const IO &io);
+
+  void iterate(const Control &control, const IO &io);
+
+  bool is_initialized() const { return m_initialized; }
+  bool power_error_ack_pending() const { return m_power_error_ack_required; }
+  Power::Error latched_power_error() const { return m_latched_power_error; }
 
 private:
   static constexpr int m_screen_width = 96;
@@ -22,13 +29,15 @@ private:
   static constexpr uint8_t m_screen_address = 0x3C;
   static constexpr uint16_t m_dim_timeout_ms = 5000;
   static constexpr uint16_t m_page_interval_ms = 2000;
-  static constexpr uint8_t m_max_pages = 4;
+  static constexpr uint16_t m_error_blink_interval_ms = 500;
+  static constexpr uint8_t m_max_pages = 5;
   static constexpr uint8_t m_line_length = 16;
 
   static constexpr uint8_t SW_LEFT_PIN = 9;
   static constexpr uint8_t SW_ENTER_PIN = 10;
   static constexpr uint8_t SW_RIGHT_PIN = 11;
   static constexpr uint16_t m_sw_poll_interval_ms = 100;
+  static constexpr uint16_t m_oled_refresh_interval_ms = 100;
 
   static constexpr uint32_t WELCOME_TIMEOUT_MS = 2000;
 
@@ -40,16 +49,27 @@ private:
     TIMEOUT_MONITOR_MIN = 4,
     TIMEOUT_MONITOR_SEC = 5,
     ABOUT = 6,
-    STATE_END = 7
+    BLUETOOTH = 7,
+    IDENTITY = 8,
+    POWER_ERROR = 9,
+    STATE_END = 10
   };
+
+  Power& m_power;
+  Flap& m_flap;
+  Bluetooth& m_bluetooth;
 
   bool m_welcome_display = true;
   MENU_STATE m_menu_state = MENU_STATE::FLAP_STATUS;
   MENU_STATE m_last_menu_state = MENU_STATE::STATE_START;
+  Power::Error m_last_power_error = Power::Error::NONE;
+  Power::Error m_latched_power_error = Power::Error::NONE;
+  bool m_power_error_ack_required = false;
   static constexpr auto m_menu_size =
       static_cast<std::size_t>(MENU_STATE::STATE_END);
   uint32_t m_menu_timestamp = 0;
   uint32_t m_page_timestamp = 0;
+  uint32_t m_oled_refresh_timestamp = 0;
 
   bool is_present_on_bus() const;
 

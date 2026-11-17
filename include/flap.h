@@ -10,7 +10,7 @@ public:
     void init();
     void set_flap(uint8_t flap);
     uint8_t get_flap() const;
-    float get_flap_voltage() const;
+    bool is_dac_present() const { return m_dac_initialized; }
     void set_dac_direct(uint16_t value);
     void write_flap_value();
 private:

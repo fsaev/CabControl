@@ -40,12 +40,6 @@ uint8_t Flap::get_flap() const {
     return m_flap_value;
 }
 
-float Flap::get_flap_voltage() const {
-    float voltage = analogRead(A3) / 1023.0 * 12.0; // Read the voltage from the potentiometer connected to A3
-    return voltage;
-
-}
-
 void Flap::set_dac_direct(uint16_t value) {
     if (m_dac_initialized) {
         m_dac.setVoltage(value, false);
@@ -56,10 +50,6 @@ void Flap::write_flap_value() {
     if(m_flap_updated && m_dac_initialized) {
         // Code to write m_flap_value to the OLED display
         m_flap_updated = false; // Reset the update flag after writing
-
-        // Send SPI commands to DAC
-        Serial.print("Writing flap value to DAC: ");
-        Serial.println(m_flap_value);
         m_dac.setVoltage(m_flap_value * 40, false); // Convert 0-100% to 0-4095 for 12-bit DAC
     }
 }

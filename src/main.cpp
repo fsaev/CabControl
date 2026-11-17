@@ -18,74 +18,102 @@
  included in any redistribution.
  **************************************************************************/
 
+#include "bluetooth.h"
+#include "control.h"
+#include "diagnostics.h"
 #include "flap.h"
 #include "io.h"
 #include "oled.h"
-#include "rgbled.h"
 #include <Arduino.h>
 
 Flap flap;
 IO io;
-Oled oled;
-RGBLED rgbled;
+Power power;
+Bluetooth bluetooth;
+Oled oled(power, flap, bluetooth);
+Control control(io, flap);
 
 uint32_t start = millis();
+uint32_t diagnostics_timestamp = 0;
+constexpr uint32_t DIAGNOSTICS_INTERVAL_MS = 500;
 
 void setup() {
-  rgbled.init();
-  rgbled.set_color(RGBLED::Colors::CYAN);
   flap.init();
   oled.init();
+  bluetooth.begin();
   pinMode(13, OUTPUT);
-  pinMode(2, OUTPUT);
-  digitalWrite(2, HIGH);
 
   Serial.begin(115200);
+  //flap.set_dac_direct(50 * 40); // Convert 0-100
+  //delay(5000);
 }
 
 void debug_dac_sweep() {
   static uint8_t dac_value = 0;
   static bool increasing = true;
   flap.set_dac_direct(dac_value * 40); // Convert 0-100
+  Serial.print("DAC Value: ");
+  Serial.println(dac_value);
   if (increasing) {
-    dac_value++;
+    dac_value += 1;
     if (dac_value >= 100) {
       increasing = false;
     }
   } else {
-    dac_value--;
-    if (dac_value == 0) {
+    dac_value -= 1;
+    if (dac_value <= 0) {
       increasing = true;
     }
   }
 }
 
+uint32_t uptime_seconds() {
+  // Accumulated in 64 bits so the uptime survives the 49-day millis() wrap.
+  static uint32_t last_ms = 0;
+  static uint64_t total_ms = 0;
+  const uint32_t now = millis();
+  total_ms += now - last_ms;
+  last_ms = now;
+  return static_cast<uint32_t>(total_ms / 1000);
+}
+
+void publish_diagnostics() {
+  Diagnostics diagnostics;
+  diagnostics.uptime_s = uptime_seconds();
+  diagnostics.dc_in_v = power.get_dc_in_voltage();
+  diagnostics.dc_adj_v = power.get_dc_adj_voltage();
+  diagnostics.dc_out_v = power.get_dc_out_voltage();
+  diagnostics.flags =
+      (power.is_dc_on() ? Diagnostics::DC_ON : 0) |
+      (flap.is_dac_present() ? Diagnostics::DAC_PRESENT : 0) |
+      (oled.power_error_ack_pending() ? Diagnostics::POWER_ACK_PENDING : 0) |
+      (oled.is_initialized() ? Diagnostics::OLED_PRESENT : 0);
+  diagnostics.power_error = static_cast<uint8_t>(power.get_error());
+  diagnostics.latched_power_error =
+      static_cast<uint8_t>(oled.latched_power_error());
+  diagnostics.flap_percent = flap.get_flap();
+  diagnostics.level = static_cast<uint8_t>(control.get_level());
+  diagnostics.timeout_level = static_cast<uint8_t>(control.get_timeout_level());
+  diagnostics.time_left_s = control.get_time_left_sec();
+  const std::vector<bool> inputs = io.get_inputs();
+  for (size_t i = 0; i < inputs.size() && i < 8; i++) {
+    diagnostics.inputs |= inputs[i] ? (1U << i) : 0;
+  }
+  bluetooth.set_diagnostics(diagnostics);
+}
+
 void loop() {
-  if (millis() - start > 100) {
+  bluetooth.iterate();
+  if (millis() - diagnostics_timestamp >= DIAGNOSTICS_INTERVAL_MS) {
+    diagnostics_timestamp = millis();
+    publish_diagnostics();
+  }
+  if (millis() - start > 5) {
+    //debug_dac_sweep();
     start = millis();
-    oled.iterate(flap, io);
-    io.iterate();
-    switch (io.get_level()) {
-    case IO::Levels::OFF:
-      rgbled.set_color(RGBLED::Colors::RED);
-      flap.set_flap(0);
-      break;
-    case IO::Levels::HALF:
-      rgbled.set_color(RGBLED::Colors::YELLOW);
-      flap.set_flap(50);
-      break;
-    case IO::Levels::FULL:
-      rgbled.set_color(RGBLED::Colors::GREEN);
-      flap.set_flap(100);
-      break;
-    case IO::Levels::TIMEOUT:
-      rgbled.set_color(RGBLED::Colors::BLUE);
-      flap.set_flap(0);
-      break;
-    case IO::Levels::UNKNOWN:
-      rgbled.set_color(RGBLED::Colors::CYAN);
-      flap.set_flap(0);
-      break;
-    }
+    oled.iterate(control, io);
+    power.iterate(flap);
+
+    control.iterate();
   }
 }

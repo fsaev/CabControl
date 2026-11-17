@@ -1,6 +1,52 @@
 
 This directory is intended for project header files.
 
+Project responsibilities:
+- IO exposes raw input states in OFF, HALF, FULL, AUX order (LOW is active).
+- Control owns input priority (FULL, HALF, OFF), operating levels, the three-hour
+  timeout and countdown, and flap commands. The RGB LED is not used: the
+  NINA module that drives it runs Bluetooth.
+  The countdown runs only in HALF/FULL and restarts when switching between them.
+  On expiry, TIMEOUT stays latched until a different level is selected.
+  No active input retains the last selection; inactive levels show zero time left.
+- Oled reads the timeout countdown from Control.
+- Bluetooth (bluetooth.h) runs BLE from boot and advertises the identification
+  name. OtaCore (ota_core.h) is the transport-independent update protocol,
+  fw_marker.h embeds the firmware version, IdentityCore (identity_core.h)
+  stores the name in /ota/NAME.TXT on the SFU flash filesystem, and
+  Diagnostics (diagnostics.h) is the snapshot published every 500 ms.
+
+Bluetooth firmware update:
+1. Run `uv run --project tools ble-flash --generate-secret` once. This writes the
+   git-ignored include/ota_secret.h, which the firmware and the script share.
+   Without it, the firmware does not build.
+2. Flash once over USB. The image includes the Arduino SFU bootloader in its
+   first 64 KB, so the application starts at 0x10010000. BLE needs NINA
+   firmware 3.0.0 or newer.
+3. Bump PARAMS_VERSION_* in params.h and build. Only newer versions are
+   accepted.
+4. Bluetooth is always on; the OLED "BLE" page shows the connection and update
+   progress (press 0 there to retry if it shows "BLE start fail"). Cab control
+   keeps running during the update.
+5. Run `uv run --project tools ble-flash [--name "Cab 3"]`, or connect in the
+   TUI (below) and press u. tools/ is a uv project (pyproject.toml, uv.lock);
+   uv creates and syncs tools/.venv on first run.
+The image is authenticated with HMAC-SHA256 (shared secret plus a per-attempt
+nonce) and verified (SHA-256, SFU present, version marker) before it is
+handed to SFU. SFU installs it on the next boot. There is no automatic
+rollback: if the new firmware misbehaves, double-tap reset and flash over USB.
+
+Bluetooth diagnostics, identification name and firmware update (TUI):
+`uv run --project tools cab-tui` lists nearby cabinets; Enter connects and
+shows live power, control, input and system diagnostics. Press n to set the
+identification name (1-15 printable ASCII characters). Press u to update the
+firmware: the dialog defaults to the PlatformIO firmware.bin (or --firmware),
+shows its version next to the device's and only accepts newer images; Escape
+aborts a running upload. Setting the name and updating need the same
+include/ota_secret.h; reading diagnostics does not. The name
+is kept across reboots and firmware updates, shown on the welcome screen and
+the OLED "Name" page, and advertised over BLE once the TUI disconnects.
+
 A header file is a file containing C declarations and macro definitions
 to be shared between several project source files. You request the use of a
 header file in your project source file (C, C++, etc) located in `src` folder
