@@ -7,6 +7,7 @@
 #include <stdint.h>
 
 // Bluetooth LE, running from boot. Advertises the identification name and
+// firmware version (manufacturer data) and
 // provides two services:
 // - firmware update (OtaCore): a verified image is handed to the Arduino SFU
 //   bootloader, which installs it after the reboot;

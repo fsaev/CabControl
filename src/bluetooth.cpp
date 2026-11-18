@@ -1,5 +1,6 @@
 #include "bluetooth.h"
 #include "fw_marker.h"
+#include "params.h"
 
 #include <Arduino.h>
 #include <ArduinoBLE.h>
@@ -11,7 +12,7 @@
 #if __has_include("ota_secret.h")
 #include "ota_secret.h"
 #else
-#error "Missing include/ota_secret.h. Create it with: python3 tools/ble_flash.py --generate-secret"
+#error "Missing include/ota_secret.h. Create it with: uv run --project tools ble-flash --generate-secret"
 #endif
 
 extern "C" void watchdog_reboot(uint32_t pc, uint32_t sp, uint32_t delay_ms);
@@ -30,6 +31,14 @@ constexpr const char *NAME_UUID = "c0de0103-cab0-4c71-9a6e-3f1d2b7e8a10";
 constexpr const char *NAME_AUTH_UUID = "c0de0104-cab0-4c71-9a6e-3f1d2b7e8a10";
 constexpr const char *NAME_SET_UUID = "c0de0105-cab0-4c71-9a6e-3f1d2b7e8a10";
 constexpr int DATA_MAX_SIZE = 244;
+// Manufacturer data in the advertisement, so scanners can show the firmware
+// version without connecting: [format][major][minor][patch]. 0xFFFF is the
+// Bluetooth SIG company ID reserved for internal/test use.
+constexpr uint16_t ADV_COMPANY_ID = 0xFFFF;
+constexpr uint8_t ADV_FORMAT_VERSION = 1;
+// ArduinoBLE keeps a pointer to this, so it must outlive advertising.
+constexpr uint8_t adv_version[] = {ADV_FORMAT_VERSION, PARAMS_VERSION_MAJOR,
+                                   PARAMS_VERSION_MINOR, PARAMS_VERSION_PATCH};
 
 BLEService ota_service(SERVICE_UUID);
 BLECharacteristic info_characteristic(INFO_UUID, BLERead, OtaCore::INFO_SIZE,
@@ -139,6 +148,7 @@ void Bluetooth::start() {
 
   apply_name();
   BLE.setAdvertisedService(ota_service);
+  BLE.setManufacturerData(ADV_COMPANY_ID, adv_version, sizeof(adv_version));
   // BLE.end() empties the services, so the characteristics are added on
   // every start.
   ota_service.addCharacteristic(info_characteristic);

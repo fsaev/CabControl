@@ -62,6 +62,10 @@ NAME_RESULTS = {
     5: "BAD_COMMAND",
 }
 
+# Advertised manufacturer data, see src/bluetooth.cpp: [format][major][minor][patch].
+ADV_COMPANY_ID = 0xFFFF
+ADV_FORMAT_VERSION = 1
+
 LEVELS = ["UNKNOWN", "TIMEOUT", "OFF", "HALF", "FULL"]
 POWER_ERRORS = ["NONE", "DC_IN_LOW", "DC_ADJ_ERR", "DC_OUT_ERR"]
 INPUT_NAMES = ["OFF", "HALF", "FULL", "AUX"]
@@ -116,6 +120,14 @@ def parse_diagnostics(raw: bytes) -> Diagnostics:
      timeout_level, time_left, inputs) = struct.unpack_from(DIAG_FORMAT, raw)
     return Diagnostics(uptime, dc_in / 1000, dc_adj / 1000, dc_out / 1000, flags,
                        error, latched, flap, level, timeout_level, time_left, inputs)
+
+
+def advertised_version(manufacturer_data: dict[int, bytes]) -> str:
+    """Firmware version from the advertisement; "?" for firmware that predates it."""
+    data = bytes(manufacturer_data.get(ADV_COMPANY_ID, b""))
+    if len(data) < 4 or data[0] != ADV_FORMAT_VERSION:
+        return "?"
+    return version_text(tuple(data[1:4]))
 
 
 def validate_name(name: str) -> str | None:
@@ -580,6 +592,7 @@ class ScanScreen(Screen):
                      id="hint")
         table = DataTable(id="devices", cursor_type="row")
         table.add_column("Name", key="name")
+        table.add_column("Firmware", key="firmware")
         table.add_column("Address", key="address")
         table.add_column("RSSI", key="rssi")
         yield table
@@ -616,12 +629,14 @@ class ScanScreen(Screen):
         if SERVICE_UUID not in [u.lower() for u in adv.service_uuids]:
             return
         name = adv.local_name or device.name or "?"
+        firmware = advertised_version(adv.manufacturer_data)
         table = self.query_one("#devices", DataTable)
         if device.address in self.devices:
             table.update_cell(device.address, "name", name)
+            table.update_cell(device.address, "firmware", firmware)
             table.update_cell(device.address, "rssi", str(adv.rssi))
         else:
-            table.add_row(name, device.address, str(adv.rssi), key=device.address)
+            table.add_row(name, firmware, device.address, str(adv.rssi), key=device.address)
         self.devices[device.address] = (device, name)
         app: CabTuiApp = self.app  # type: ignore[assignment]
         if app.wants_auto_connect(device.address, name):
