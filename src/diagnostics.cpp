@@ -36,8 +36,8 @@ void Diagnostics::encode(uint8_t out[SIZE]) const {
   out[12] = power_error;
   out[13] = latched_power_error;
   out[14] = flap_percent;
-  out[15] = level;
-  out[16] = timeout_level;
+  out[15] = flap_state;
+  out[16] = door;
   put_u16(out + 17, time_left_s);
   out[19] = inputs;
 }

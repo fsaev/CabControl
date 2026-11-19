@@ -1,4 +1,5 @@
 #include "bluetooth.h"
+#include "sha256.h"
 #include "fw_marker.h"
 #include "params.h"
 
@@ -50,6 +51,8 @@ BLECharacteristic status_characteristic(STATUS_UUID, BLERead | BLENotify,
                                         OtaCore::STATUS_SIZE, true);
 
 BLEService diag_service(DIAG_SERVICE_UUID);
+BLECharacteristic reset_characteristic("c0de0106-cab0-4c71-9a6e-3f1d2b7e8a10",
+                                       BLERead | BLEWrite, 17);
 BLECharacteristic diag_characteristic(DIAG_UUID, BLERead | BLENotify,
                                       Diagnostics::SIZE, true);
 BLECharacteristic name_characteristic(NAME_UUID, BLERead | BLENotify,
@@ -115,6 +118,10 @@ void handle_name_set_written(BLEDevice, BLECharacteristic characteristic) {
   }
 }
 
+void handle_reset_written(BLEDevice, BLECharacteristic characteristic) {
+  s_instance->on_reset_written(characteristic.value(), characteristic.valueLength());
+}
+
 } // namespace
 
 Bluetooth::Bluetooth()
@@ -160,6 +167,7 @@ void Bluetooth::start() {
   diag_service.addCharacteristic(name_characteristic);
   diag_service.addCharacteristic(name_auth_characteristic);
   diag_service.addCharacteristic(name_set_characteristic);
+  diag_service.addCharacteristic(reset_characteristic);
   BLE.addService(diag_service);
 
   BLE.setEventHandler(BLEConnected, handle_connected);
@@ -168,6 +176,7 @@ void Bluetooth::start() {
   data_characteristic.setEventHandler(BLEWritten, handle_data_written);
   name_set_characteristic.setEventHandler(BLEWritten,
                                           handle_name_set_written);
+  reset_characteristic.setEventHandler(BLEWritten, handle_reset_written);
 
   m_ota.reset();
   m_identity.reset();
@@ -219,6 +228,7 @@ void Bluetooth::set_diagnostics(const Diagnostics &diagnostics) {
 
 void Bluetooth::on_connected() {
   m_connected = true;
+  publish_reset_challenge(0);
   m_activity_timestamp = millis();
   m_ota.reset();
   m_identity.reset();
@@ -236,9 +246,37 @@ void Bluetooth::on_disconnected() {
 }
 
 void Bluetooth::on_control_written(const uint8_t *data, size_t len) {
+  if (m_reboot_pending) return;
   m_activity_timestamp = millis();
   m_ota.handle_control(data, len);
   publish_ota();
+}
+
+void Bluetooth::publish_reset_challenge(uint8_t result) {
+  fill_random(m_reset_nonce, sizeof(m_reset_nonce));
+  uint8_t response[1 + sizeof(m_reset_nonce)] = {result};
+  memcpy(response + 1, m_reset_nonce, sizeof(m_reset_nonce));
+  reset_characteristic.writeValue(response, sizeof(response));
+}
+
+void Bluetooth::on_reset_written(const uint8_t *data, size_t len) {
+  constexpr char label[] = "CabControl-RESET-v1";
+  uint8_t message[sizeof(label) - 1 + sizeof(m_reset_nonce)];
+  memcpy(message, label, sizeof(label) - 1);
+  memcpy(message + sizeof(label) - 1, m_reset_nonce, sizeof(m_reset_nonce));
+  uint8_t mac[Sha256::DIGEST_SIZE];
+  hmac_sha256(OTA_SECRET, sizeof(OTA_SECRET), message, sizeof(message), mac);
+  // A 128-bit tag fits even the minimum ATT MTU in a single write.
+  if (len != 16 || !constant_time_equal(mac, data, 16)) {
+    publish_reset_challenge(2);
+  } else if (m_reboot_pending || (m_ota.state() != OtaCore::State::IDLE &&
+                                 m_ota.state() != OtaCore::State::ERROR)) {
+    publish_reset_challenge(3);
+  } else {
+    m_reboot_pending = true;
+    m_reboot_timestamp = millis();
+    publish_reset_challenge(1);
+  }
 }
 
 void Bluetooth::on_data_written(const uint8_t *data, size_t len) {
@@ -264,7 +302,7 @@ void Bluetooth::iterate() {
   BLE.poll();
 
   const uint32_t now = millis();
-  if (m_ota.state() == OtaCore::State::READY) {
+  if (m_reboot_pending || m_ota.state() == OtaCore::State::READY) {
     if (!m_reboot_pending) {
       m_reboot_pending = true;
       m_reboot_timestamp = now;

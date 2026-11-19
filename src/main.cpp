@@ -39,6 +39,7 @@ constexpr uint32_t DIAGNOSTICS_INTERVAL_MS = 500;
 
 void setup() {
   flap.init();
+  control.begin();
   oled.init();
   bluetooth.begin();
   pinMode(13, OUTPUT);
@@ -87,18 +88,16 @@ void publish_diagnostics() {
       (power.is_dc_on() ? Diagnostics::DC_ON : 0) |
       (flap.is_dac_present() ? Diagnostics::DAC_PRESENT : 0) |
       (oled.power_error_ack_pending() ? Diagnostics::POWER_ACK_PENDING : 0) |
-      (oled.is_initialized() ? Diagnostics::OLED_PRESENT : 0);
+      (oled.is_initialized() ? Diagnostics::OLED_PRESENT : 0) |
+      (control.unexpected_io() ? Diagnostics::UNEXPECTED_IO : 0);
   diagnostics.power_error = static_cast<uint8_t>(power.get_error());
   diagnostics.latched_power_error =
       static_cast<uint8_t>(oled.latched_power_error());
   diagnostics.flap_percent = flap.get_flap();
-  diagnostics.level = static_cast<uint8_t>(control.get_level());
-  diagnostics.timeout_level = static_cast<uint8_t>(control.get_timeout_level());
+  diagnostics.flap_state = static_cast<uint8_t>(control.flap_state());
+  diagnostics.door = static_cast<uint8_t>(control.door());
   diagnostics.time_left_s = control.get_time_left_sec();
-  const std::vector<bool> inputs = io.get_inputs();
-  for (size_t i = 0; i < inputs.size() && i < 8; i++) {
-    diagnostics.inputs |= inputs[i] ? (1U << i) : 0;
-  }
+  diagnostics.inputs = io.active_switches();
   bluetooth.set_diagnostics(diagnostics);
 }
 

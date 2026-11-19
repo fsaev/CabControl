@@ -49,7 +49,7 @@ void Oled::init() {
   pinMode(SW_RIGHT_PIN, INPUT_PULLUP);
 }
 
-void Oled::iterate_sw() {
+void Oled::iterate_sw(Control &control) {
 
   m_sw_poll_timestamp = millis();
 
@@ -59,15 +59,28 @@ void Oled::iterate_sw() {
   bool sw_enter = digitalRead(SW_ENTER_PIN);
   bool sw_right = digitalRead(SW_RIGHT_PIN);
 
-  // Detect press (transition from HIGH to LOW)
+  const bool left_pressed = sw_left_prev == HIGH && sw_left == LOW;
+  const bool enter_pressed = sw_enter_prev == HIGH && sw_enter == LOW;
+  const bool right_pressed = sw_right_prev == HIGH && sw_right == LOW;
+  sw_left_prev = sw_left;
+  sw_enter_prev = sw_enter;
+  sw_right_prev = sw_right;
+  if (!left_pressed && !enter_pressed && !right_pressed) {
+    return;
+  }
+  const bool wake_only = m_display_off;
+  reset_dimmed();
+  if (wake_only) {
+    return;
+  }
   if (m_power_error_ack_required) {
-    if (sw_enter_prev == HIGH && sw_enter == LOW) {
-      reset_dimmed();
+    if (enter_pressed) {
       m_power_error_ack_required = false;
       m_page_timestamp = millis();
     }
-  } else if (sw_left_prev == HIGH && sw_left == LOW) {
-    reset_dimmed();
+  } else if (m_menu_state == MENU_STATE::IO_ERROR && control.unexpected_io()) {
+    if (enter_pressed) control.acknowledge_io();
+  } else if (left_pressed) {
     if (m_menu_state == static_cast<MENU_STATE>(static_cast<int>(MENU_STATE::STATE_START) + 1)) {
       m_menu_state =
           static_cast<MENU_STATE>(static_cast<int>(MENU_STATE::STATE_END) - 1);
@@ -75,14 +88,12 @@ void Oled::iterate_sw() {
       m_menu_state =
           static_cast<MENU_STATE>(static_cast<int>(m_menu_state) - 1);
     }
-  } else if (sw_enter_prev == HIGH && sw_enter == LOW) {
-    reset_dimmed();
+  } else if (enter_pressed) {
     if (m_menu_state == MENU_STATE::BLUETOOTH && m_bluetooth.start_failed()) {
       m_bluetooth.retry();
       m_page_timestamp = millis();
     }
-  } else if (sw_right_prev == HIGH && sw_right == LOW) {
-    reset_dimmed();
+  } else if (right_pressed) {
     if (m_menu_state ==
         static_cast<MENU_STATE>(static_cast<int>(MENU_STATE::STATE_END) - 1)) {
       m_menu_state = static_cast<MENU_STATE>(
@@ -98,14 +109,11 @@ void Oled::iterate_sw() {
     m_last_menu_state = m_menu_state;
   }
 
-  sw_left_prev = sw_left;
-  sw_enter_prev = sw_enter;
-  sw_right_prev = sw_right;
 }
 
 
 
-void Oled::iterate(const Control &control, const IO &io) {
+void Oled::iterate(Control &control, const IO &io) {
   if (!m_initialized) {
     return;
   }
@@ -115,6 +123,9 @@ void Oled::iterate(const Control &control, const IO &io) {
   }
   m_oled_refresh_timestamp = millis();
 
+  if (m_menu_state != MENU_STATE::STATE_START) {
+    iterate_sw(control);
+  }
   const Power::Error power_error = m_power.get_error();
   if (power_error != m_last_power_error) {
     m_last_power_error = power_error;
@@ -129,11 +140,25 @@ void Oled::iterate(const Control &control, const IO &io) {
     }
   }
 
+  if (control.unexpected_io() && !m_power_error_ack_required &&
+      m_menu_state != MENU_STATE::IO_ERROR) {
+    m_menu_state = m_last_menu_state = MENU_STATE::IO_ERROR;
+    m_welcome_display = false;
+    reset_dimmed();
+  }
+
+  const uint32_t inactive_ms = millis() - m_dim_timestamp;
+  if (!m_display_off && inactive_ms >= m_off_timeout_ms) {
+    m_display.ssd1306_command(SSD1306_DISPLAYOFF);
+    m_display_off = true;
+  }
+  if (m_display_off) {
+    return;
+  }
+
   char top_line[m_max_pages][m_line_length] = {};
   char bottom_line[m_max_pages][m_line_length] = {};
   uint8_t pages = 1;
-
-  const std::vector<bool> inputs = io.get_inputs();
 
   if (m_welcome_display) {
     snprintf(top_line[0], sizeof(top_line[0]), "%s", m_bluetooth.name());
@@ -156,11 +181,19 @@ void Oled::iterate(const Control &control, const IO &io) {
       snprintf(bottom_line[0], sizeof(bottom_line[0]), "Out: %.2fV",
                m_power.get_dc_out_voltage());
       break;
-    case MENU_STATE::INPUT_MONITOR:
-      snprintf(top_line[0], sizeof(top_line[0]), "Inputs:");
-      snprintf(bottom_line[0], sizeof(bottom_line[0]), "%d %d %d %d",
-               inputs[0] ? 1 : 0, inputs[1] ? 1 : 0, inputs[2] ? 1 : 0,
-               inputs[3] ? 1 : 0);
+    case MENU_STATE::INPUT_MONITOR: {
+      const auto door = control.door();
+      const uint8_t active = io.active_switches();
+      snprintf(top_line[0], sizeof(top_line[0]), "Door: %s",
+               door == Control::Door::TOP ? "TOP" : door == Control::Door::DOWN ? "DOWN" : "HALF");
+      snprintf(bottom_line[0], sizeof(bottom_line[0]), "Upper:%d Lower:%d",
+               !!(active & IO::UPPER), !!(active & IO::LOWER));
+      break;
+    }
+    case MENU_STATE::IO_ERROR:
+      snprintf(top_line[0], sizeof(top_line[0]), "%s",
+               control.unexpected_io() ? "UNEXPECTED_IO" : "IO error: NONE");
+      if (control.unexpected_io()) snprintf(bottom_line[0], sizeof(bottom_line[0]), "Press 0 to ack");
       break;
     case MENU_STATE::TIMEOUT_MONITOR_MIN:
       snprintf(top_line[0], sizeof(top_line[0]), "Timeout min:");
@@ -273,12 +306,8 @@ void Oled::iterate(const Control &control, const IO &io) {
   m_display.display();
 
   m_display.dim(m_dimmed);
-  if (millis() - m_dim_timestamp > m_dim_timeout_ms) {
+  if (inactive_ms > m_dim_timeout_ms) {
     m_dimmed = true;
-  }
-
-  if (m_menu_state != MENU_STATE::STATE_START) {
-    iterate_sw();
   }
 }
 

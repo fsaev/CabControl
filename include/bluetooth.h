@@ -37,6 +37,7 @@ public:
   void on_control_written(const uint8_t *data, size_t len);
   void on_data_written(const uint8_t *data, size_t len);
   void on_name_set_written(const uint8_t *data, size_t len);
+  void on_reset_written(const uint8_t *data, size_t len);
 
 private:
   static constexpr uint32_t m_transfer_timeout_ms = 30UL * 1000UL;
@@ -45,6 +46,7 @@ private:
   void start();
   void publish_ota();
   void publish_identity();
+  void publish_reset_challenge(uint8_t result);
   void apply_name();
 
   OtaCore m_ota;
@@ -59,6 +61,7 @@ private:
   bool m_start_failed = false;
   bool m_storage_ready = false;
   bool m_reboot_pending = false;
+  uint8_t m_reset_nonce[16] = {};
   uint32_t m_activity_timestamp = 0;
   uint32_t m_reboot_timestamp = 0;
 };

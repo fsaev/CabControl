@@ -2,14 +2,19 @@
 This directory is intended for project header files.
 
 Project responsibilities:
-- IO exposes raw input states in OFF, HALF, FULL, AUX order (LOW is active).
-- Control owns input priority (FULL, HALF, OFF), operating levels, the three-hour
-  timeout and countdown, and flap commands. The RGB LED is not used: the
-  NINA module that drives it runs Bluetooth.
-  The countdown runs only in HALF/FULL and restarts when switching between them.
-  On expiry, TIMEOUT stays latched until a different level is selected.
-  No active input retains the last selection; inactive levels show zero time left.
-- Oled reads the timeout countdown from Control.
+- Door switches are active-low: upper D3, lower D4; D5/D6 are unused.
+  The switch reading must be stable for 100 ms. Held switches do not repeat.
+  Boot assumes HALF and commands FULL suction. Upper toggles TOP/HALF;
+  lower toggles HALF/DOWN. Lower at TOP moves to DOWN; upper at DOWN moves
+  to HALF. Both unexpected transitions latch UNEXPECTED_IO. Both switches
+  together latch the same error without moving. Acknowledge on the OLED;
+  the IO fault does not disable DC OUT.
+- Door TOP commands CLOSED (20%), HALF commands FULL (100%), and DOWN
+  commands HALF (75%). Only FULL has a one-hour countdown. At expiry the
+  flap reports TIMEOUT and commands 20% until the door position changes.
+- The OLED dims after 5 seconds and turns off after 2 minutes without a menu
+  button press. The first press wakes it without navigating or acknowledging
+  an error. A new power error also wakes it and restarts the inactivity timer.
 - Bluetooth (bluetooth.h) runs BLE from boot and advertises the identification
   name. OtaCore (ota_core.h) is the transport-independent update protocol,
   fw_marker.h embeds the firmware version, IdentityCore (identity_core.h)
@@ -40,13 +45,23 @@ Bluetooth diagnostics, identification name and firmware update (TUI):
 `uv run --project tools cab-tui` lists nearby cabinets with their name and
 firmware version (advertised by the device; "?" for firmware that does not
 advertise it yet); Enter connects and shows live power, control, input and
-system diagnostics. Press n to set the identification name (1-15 printable
-ASCII characters). Press u to update the firmware: the dialog defaults to the PlatformIO firmware.bin (or --firmware),
-shows its version next to the device's and only accepts newer images; Escape
-aborts a running upload. Setting the name and updating need the same
-include/ota_secret.h; reading diagnostics does not. The name
-is kept across reboots and firmware updates, shown on the welcome screen and
-the OLED "Name" page, and advertised over BLE once the TUI disconnects.
+system diagnostics. For door-state firmware, the first two rows show physical
+door position and flap state separately (for example HALF and TIMEOUT).
+Older firmware reports its legacy level instead. On a connected cabinet,
+press r then y to reboot using the shared secret (Escape cancels). The saved
+name and firmware stay intact; boot assumes HALF and commands FULL suction.
+In the scan list r still rescans. Press n to set the identification name (1-15 printable
+ASCII characters). Press u to update the firmware: the dialog defaults to the
+PlatformIO firmware.bin (or --firmware), shows its version next to the
+device's and only accepts newer images; Escape aborts a running upload. In the
+scan list, b opens batch update: pick the image, then select cabinets (current
+firmware and outdated/up to date/unknown are shown; outdated ones are
+preselected, up-to-date ones cannot be chosen) and press s. They are updated
+two at a time; each must come back advertising the new version, a failure does
+not stop the batch, and Escape aborts it. Setting the name and updating need
+the same include/ota_secret.h; reading diagnostics does not. The name is kept
+across reboots and firmware updates, shown on the welcome screen and the OLED
+"Name" page, and advertised over BLE once the TUI disconnects.
 
 A header file is a file containing C declarations and macro definitions
 to be shared between several project source files. You request the use of a
